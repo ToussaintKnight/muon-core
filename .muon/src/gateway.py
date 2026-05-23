@@ -93,8 +93,9 @@ class TelegramGateway:
         application = Application.builder().token(self.bot_token).build()
 
         application.add_handler(CommandHandler("start", self._handle_start))
+        # Capture ALL text messages including /commands — CommandProxy handles routing
         application.add_handler(
-            MessageHandler(filters.TEXT & ~filters.COMMAND, self._handle_message)
+            MessageHandler(filters.TEXT, self._handle_message)
         )
 
         logger.info("Starting Telegram Gateway...")
