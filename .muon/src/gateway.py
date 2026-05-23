@@ -100,3 +100,35 @@ class TelegramGateway:
 
         logger.info("Starting Telegram Gateway...")
         application.run_polling()
+
+
+if __name__ == "__main__":
+    import os
+    import yaml
+    from src.context_registry import ContextRegistry
+    from src.task_switcher import TaskSwitcher
+
+    # Load config from ~/.muon/config.yaml
+    config_path = os.path.expanduser("~/.muon/config.yaml")
+    if not os.path.exists(config_path):
+        print(f"Config not found: {config_path}")
+        print("Create it with your bot_token and user_chat_id.")
+        exit(1)
+
+    with open(config_path) as f:
+        config = yaml.safe_load(f)
+
+    token = config.get("telegram", {}).get("bot_token")
+    if not token:
+        print("bot_token not found in config.yaml")
+        exit(1)
+
+    # Initialize core components
+    db_path = os.path.expanduser("~/.muon/context.db")
+    registry = ContextRegistry(db_path=db_path)
+    switcher = TaskSwitcher(context_registry=registry, base_dir=os.path.expanduser("~/projects"))
+    proxy = CommandProxy(task_switcher=switcher, context_registry=registry)
+
+    # Start gateway
+    gateway = TelegramGateway(bot_token=token, proxy=proxy)
+    gateway.run()
