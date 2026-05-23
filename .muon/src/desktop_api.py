@@ -173,6 +173,11 @@ def create_desktop_api() -> DesktopAPI:
 desktop_api = create_desktop_api()
 
 
+@app.get("/")
+def root():
+    return {"status": "ok", "platform": sys.platform, "api": "muon-desktop"}
+
+
 @app.post("/browser")
 def browser_endpoint(request: BrowserRequest):
     return desktop_api.open_browser(request.url)
