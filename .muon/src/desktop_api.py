@@ -64,18 +64,35 @@ class MacDesktopAPI(DesktopAPI):
             return {"status": "error", "error": e.stderr or "AppleScript failed"}
 
     def screenshot(self) -> dict:
-        path = "/tmp/muon_screenshot.png"
+        png_path = "/tmp/muon_screenshot.png"
+        jpg_path = "/tmp/muon_screenshot.jpg"
         try:
+            # -x = silent (no camera sound)
             subprocess.run(
-                ["screencapture", path],
+                ["screencapture", "-x", png_path],
                 check=True, capture_output=True, text=True
             )
-            if not os.path.exists(path):
+            if not os.path.exists(png_path):
                 return {"status": "error", "error": "Screenshot file not created"}
 
-            with open(path, "rb") as f:
+            # Compress Retina PNG → JPEG (quality 70) to reduce size ~90%
+            subprocess.run(
+                ["sips", "-s", "format", "jpeg", "-s", "formatOptions", "70",
+                 png_path, "--out", jpg_path],
+                check=True, capture_output=True, text=True
+            )
+
+            with open(jpg_path, "rb") as f:
                 img_bytes = f.read()
-            return {"image_b64": base64.b64encode(img_bytes).decode()}
+
+            # Cleanup temp files
+            for p in (png_path, jpg_path):
+                try:
+                    os.remove(p)
+                except OSError:
+                    pass
+
+            return {"image_b64": base64.b64encode(img_bytes).decode(), "format": "jpeg"}
         except subprocess.CalledProcessError as e:
             logger.error("Failed to capture screenshot: %s", e.stderr)
             return {"status": "error", "error": e.stderr or "screencapture failed"}
@@ -108,14 +125,15 @@ class WinDesktopAPI(DesktopAPI):
             return {"status": "error", "error": e.stderr or "PowerShell failed"}
 
     def screenshot(self) -> dict:
-        path = os.path.expanduser("~\\AppData\\Local\\Temp\\muon_screenshot.png")
+        png_path = os.path.expanduser("~\\AppData\\Local\\Temp\\muon_screenshot.png")
+        jpg_path = os.path.expanduser("~\\AppData\\Local\\Temp\\muon_screenshot.jpg")
         ps_script = (
             f'Add-Type -AssemblyName System.Drawing; '
             f'$bmp = New-Object System.Drawing.Bitmap([System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Width, '
             f'[System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Height); '
             f'$graphics = [System.Drawing.Graphics]::FromImage($bmp); '
             f'$graphics.CopyFromScreen(0, 0, 0, 0, $bmp.Size); '
-            f'$bmp.Save("{path}"); '
+            f'$bmp.Save("{png_path}"); '
             f'$graphics.Dispose(); $bmp.Dispose()'
         )
         try:
@@ -123,12 +141,35 @@ class WinDesktopAPI(DesktopAPI):
                 ["powershell", "-Command", ps_script],
                 check=True, capture_output=True, text=True
             )
-            if not os.path.exists(path):
+            if not os.path.exists(png_path):
                 return {"status": "error", "error": "Screenshot file not created"}
 
-            with open(path, "rb") as f:
+            # Compress PNG → JPEG to reduce size
+            compress_script = (
+                f'Add-Type -AssemblyName System.Drawing; '
+                f'$img = [System.Drawing.Image]::FromFile("{png_path}"); '
+                f'$encoder = [System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() | Where-Object {{ $_.FormatDescription -eq "JPEG" }}; '
+                f'$encoderParams = New-Object System.Drawing.Imaging.EncoderParameters(1); '
+                f'$encoderParams.Param[0] = New-Object System.Drawing.Imaging.EncoderParameter([System.Drawing.Imaging.Encoder]::Quality, 70); '
+                f'$img.Save("{jpg_path}", $encoder, $encoderParams); '
+                f'$img.Dispose()'
+            )
+            subprocess.run(
+                ["powershell", "-Command", compress_script],
+                check=True, capture_output=True, text=True
+            )
+
+            with open(jpg_path, "rb") as f:
                 img_bytes = f.read()
-            return {"image_b64": base64.b64encode(img_bytes).decode()}
+
+            # Cleanup
+            for p in (png_path, jpg_path):
+                try:
+                    os.remove(p)
+                except OSError:
+                    pass
+
+            return {"image_b64": base64.b64encode(img_bytes).decode(), "format": "jpeg"}
         except subprocess.CalledProcessError as e:
             logger.error("Failed to capture screenshot: %s", e.stderr)
             return {"status": "error", "error": e.stderr or "PowerShell failed"}

@@ -65,18 +65,24 @@ class TestMacDesktopAPI:
     @patch("subprocess.run")
     @patch("builtins.open", create=True)
     @patch("os.path.exists")
-    def test_screenshot_reads_png_file(self, mock_exists, mock_open_fn, mock_run, mac):
+    @patch("os.remove")
+    def test_screenshot_reads_jpeg_file(self, mock_remove, mock_exists, mock_open_fn, mock_run, mac):
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
         mock_exists.return_value = True
         mock_file = MagicMock()
-        mock_file.read.return_value = b"fake_png_data"
+        mock_file.read.return_value = b"fake_jpg_data"
         mock_open_fn.return_value.__enter__.return_value = mock_file
 
         result = mac.screenshot()
 
-        mock_run.assert_called_once()
-        assert "screencapture" in str(mock_run.call_args[0][0])
-        assert result["image_b64"] == base64.b64encode(b"fake_png_data").decode()
+        # screencapture + sips = 2 subprocess calls
+        assert mock_run.call_count == 2
+        first_call = mock_run.call_args_list[0][0][0]
+        second_call = mock_run.call_args_list[1][0][0]
+        assert "screencapture" in str(first_call)
+        assert "sips" in str(second_call)
+        assert result["image_b64"] == base64.b64encode(b"fake_jpg_data").decode()
+        assert result["format"] == "jpeg"
 
     @patch("subprocess.run")
     def test_applescript_error_returns_error_dict(self, mock_run, mac):
