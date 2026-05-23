@@ -54,12 +54,12 @@ def check_dependencies() -> bool:
         return False
 
 
-def install_dependencies(project_root: Path) -> bool:
-    """Install requirements.txt."""
+def install_dependencies(project_root: Path) -> tuple[bool, Path | None]:
+    """Install requirements.txt. Returns (success, venv_python_path)."""
     req_file = project_root / "requirements.txt"
     if not req_file.exists():
         print("  requirements.txt not found, skipping install")
-        return True
+        return True, None
 
     print("  Installing dependencies from requirements.txt...")
     result = subprocess.run(
@@ -68,17 +68,47 @@ def install_dependencies(project_root: Path) -> bool:
     )
     if result.returncode == 0:
         print("  Dependencies installed OK")
-        return True
+        return True, None
+
+    # Handle externally-managed environments (macOS brew Python, etc.)
+    if "externally-managed" in result.stderr:
+        print("  Detected externally-managed environment.")
+        venv_dir = project_root / ".venv"
+        venv_python = venv_dir / ("Scripts/python.exe" if platform.system() == "Windows" else "bin/python3")
+
+        if not venv_dir.exists():
+            print("  Creating virtual environment (.venv)...")
+            venv_result = subprocess.run(
+                [sys.executable, "-m", "venv", str(venv_dir)],
+                capture_output=True, text=True
+            )
+            if venv_result.returncode != 0:
+                print(f"  venv creation failed: {venv_result.stderr[:200]}")
+                return False, None
+            print("  Virtual environment created.")
+
+        print("  Installing into virtual environment...")
+        result = subprocess.run(
+            [str(venv_python), "-m", "pip", "install", "-r", str(req_file)],
+            capture_output=True, text=True
+        )
+        if result.returncode == 0:
+            print("  Dependencies installed in venv OK")
+            return True, venv_python
+        else:
+            print(f"  venv install failed: {result.stderr[:200]}")
+            return False, None
     else:
         print(f"  Install failed: {result.stderr[:200]}")
-        return False
+        return False, None
 
 
-def run_tests(project_root: Path) -> bool:
-    """Run full pytest suite."""
+def run_tests(project_root: Path, venv_python: Path | None = None) -> bool:
+    """Run full pytest suite. Optionally use venv python."""
+    python = str(venv_python) if venv_python else sys.executable
     print("  Running tests...")
     result = subprocess.run(
-        [sys.executable, "-m", "pytest", "tests/", "-v", "--tb=short"],
+        [python, "-m", "pytest", "tests/", "-v", "--tb=short"],
         cwd=str(project_root),
         capture_output=True, text=True
     )
@@ -119,8 +149,9 @@ def main():
     # Phase 2: Dependencies
     print_section("2. Dependencies")
     deps_ok = check_dependencies()
+    venv_python = None
     if not deps_ok:
-        deps_ok = install_dependencies(project_root)
+        deps_ok, venv_python = install_dependencies(project_root)
 
     # Phase 3: Files
     print_section("3. Project Files")
@@ -137,7 +168,7 @@ def main():
 
     # Phase 4: Tests
     print_section("4. Test Suite")
-    tests_ok = run_tests(project_root)
+    tests_ok = run_tests(project_root, venv_python)
 
     # Summary
     print_section("Summary")
