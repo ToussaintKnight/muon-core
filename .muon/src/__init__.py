@@ -1,1 +1,1 @@
-# muon-core OOO remote work system
+# Muon Core — src package
