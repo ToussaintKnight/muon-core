@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# SQLite databases (dev/test only - production uses ~/.muon/)
+*.db
+*.db-journal
+
+# Config files with secrets
+config.yaml
+config.yml
+.env
+
+# Test artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# WorkBuddy local
+.workbuddy/memory/*.md

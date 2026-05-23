@@ -1,0 +1,101 @@
+"""Telegram Gateway - Bot entry point that routes messages to Command Proxy.
+
+Design decisions:
+- Accepts an optional 'bot' parameter for testing (dependency injection)
+- Plain text messages are auto-prefixed with /ask for convenience
+- Empty messages are silently ignored
+- All errors are caught and sent back as error messages to the user
+- Double-truncation: CommandProxy truncates to 4096, Gateway ensures send doesn't exceed
+"""
+
+import logging
+from telegram import Update
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+
+from src.command_proxy import CommandProxy
+
+logger = logging.getLogger(__name__)
+TELEGRAM_MAX_LENGTH = 4096
+
+
+class TelegramGateway:
+    """Telegram Bot gateway that receives messages and delegates to CommandProxy."""
+
+    def __init__(
+        self,
+        bot_token: str,
+        proxy: CommandProxy,
+        bot=None
+    ):
+        self.bot_token = bot_token
+        self.proxy = proxy
+        self._bot = bot  # Injected for testing; None in production
+
+    async def _handle_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /start command."""
+        welcome = (
+            "Welcome to muon-core OOO Gateway.\n\n"
+            "Available commands:\n"
+            "  /status - show all tasks\n"
+            "  /switch [task] - switch to a task\n"
+            "  /ask <question> - ask about current task\n"
+            "  /browser <url> - open URL on desktop\n"
+            "  /screenshot - capture screen\n\n"
+            "Or just type your question and I'll route it to the active agent."
+        )
+        await self._send_reply(update, context, welcome)
+
+    async def _handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle incoming text messages (commands and plain text)."""
+        if not update.message or not update.message.text:
+            return
+
+        text = update.message.text.strip()
+        if not text:
+            return
+
+        # Auto-prefix plain text with /ask for convenience
+        if not text.startswith("/"):
+            text = f"/ask {text}"
+
+        try:
+            response = await self.proxy.handle(text)
+        except Exception as e:
+            logger.exception("Error handling command")
+            response = f"Error processing command: {str(e)}"
+
+        await self._send_reply(update, context, response)
+
+    async def _send_reply(self, update: Update, context: ContextTypes.DEFAULT_TYPE, text: str):
+        """Send a reply, with truncation safety."""
+        chat_id = update.effective_chat.id if update.effective_chat else None
+        if not chat_id:
+            logger.warning("No chat_id available for reply")
+            return
+
+        # Final safety truncation
+        if len(text) > TELEGRAM_MAX_LENGTH:
+            truncation = f"\n\n... ({len(text) - TELEGRAM_MAX_LENGTH + 50} chars truncated)"
+            text = text[:TELEGRAM_MAX_LENGTH - len(truncation)] + truncation
+
+        try:
+            await context.bot.send_message(chat_id=chat_id, text=text)
+        except Exception as e:
+            logger.exception("Failed to send reply to chat %s", chat_id)
+
+    def run(self):
+        """Start the bot with polling."""
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+        )
+
+        application = Application.builder().token(self.bot_token).build()
+
+        application.add_handler(CommandHandler("start", self._handle_start))
+        application.add_handler(
+            MessageHandler(filters.TEXT & ~filters.COMMAND, self._handle_message)
+        )
+
+        logger.info("Starting Telegram Gateway...")
+        application.run_polling()
